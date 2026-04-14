@@ -1,0 +1,4 @@
+interface:
+  display_name: "Skill Git"
+  short_description: "Publish skills to same-name GitHub repos"
+  default_prompt: "Publish a local Codex skill to a same-name GitHub repository."
