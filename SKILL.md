@@ -21,8 +21,9 @@ Use `scripts/skill_git.py` whenever a local skill needs to be published to GitHu
 1. Run `show-config` to confirm the token source, SSH alias, and local repo cache path.
 2. Run `publish-skill` with `--skill-name` or `--skill-path`.
 3. Let the script read `SKILL.md`, derive the skill name, and use that name as the GitHub repository name.
-4. Let the script create the GitHub repo if it does not exist, clone or refresh the local cache, replace the repo root with the skill contents, generate `README.md`, commit, and push.
-5. Use `--readme-file` only when a custom GitHub README is required instead of the generated one.
+4. When the local cache repo may already contain local changes, use the safe sync order first: stash local changes, sync remote latest into the cache repo, then restore the stash and resolve any merge conflicts before the final commit/push.
+5. Let the script create the GitHub repo if it does not exist, clone or refresh the local cache, replace the repo root with the skill contents, generate `README.md`, commit, and push.
+6. Use `--readme-file` only when a custom GitHub README is required instead of the generated one.
 
 ## Commands
 
@@ -44,6 +45,7 @@ Use `scripts/skill_git.py` whenever a local skill needs to be published to GitHu
 - Publish each skill into its own same-name repository. Do not add an extra skill root directory inside the repository.
 - Use the GitHub token only for GitHub API calls such as checking or creating repositories.
 - Use SSH for clone, fetch, pull, and push so the token is not embedded in git remotes.
+- To avoid accidental overwrite during sync, prefer this order whenever the local cache repo has pending work: stash local changes -> sync remote latest -> restore stash and merge -> commit -> push.
 - Generate a root `README.md` for GitHub by default so the repository is readable outside Codex.
 - Exclude `.git`, `__pycache__`, `.pyc`, and similar cache artifacts from published repositories.
 - Do not print or persist the token value.
