@@ -5,7 +5,6 @@ Publish local Codex skills to GitHub with one token and one SSH transport, using
 ## Skill layout
 
 - `agents/openai.yaml`
-- `plan.md`
 - `references/asset-policy.md`
 - `requirements.txt`
 - `scripts/skill_assets.py`
@@ -92,6 +91,7 @@ The other Git defaults are configurable with `SKILL_GIT_OWNER`,
 
 - Keep source, config, documentation and small assets in Git.
 - Put files at or above 1 MiB into OSS automatically.
+- `plan.md` and `.omo/` are local planning files and are never published.
 - Never commit logs, `result/`, `multi_logs/`, caches, generated build
   intermediates, secrets, or large binaries.
 - GitHub warns at 50 MiB and blocks ordinary Git objects at 100 MiB; those are

@@ -73,6 +73,7 @@ The other Git defaults are configurable with `SKILL_GIT_OWNER`,
 
 - Keep source, config, documentation and small assets in Git.
 - Put files at or above 1 MiB into OSS automatically.
+- `plan.md` and `.omo/` are local planning files and are never published.
 - Never commit logs, `result/`, `multi_logs/`, caches, generated build
   intermediates, secrets, or large binaries.
 - GitHub warns at 50 MiB and blocks ordinary Git objects at 100 MiB; those are

@@ -13,6 +13,7 @@ from urllib.parse import quote
 
 EXCLUDED_DIRS = {
     ".git",
+    ".omo",
     ".opencode",
     ".pytest_cache",
     "__pycache__",
@@ -22,6 +23,7 @@ EXCLUDED_DIRS = {
     "logs",
 }
 EXCLUDED_EXTENSIONS = {".log", ".pyc", ".pyo", ".tmp"}
+LOCAL_ONLY_FILES = {"plan.md"}
 GIT_WARN_BYTES = 1024 * 1024
 GIT_RECOMMENDED_MAX = 5 * 1024 * 1024
 GITHUB_HARD_BYTES = 100 * 1024 * 1024
@@ -62,7 +64,7 @@ def scan_skill(root: Path, threshold: int = GIT_WARN_BYTES) -> SkillScan:
             continue
         relative = path.relative_to(root)
         parts = set(relative.parts)
-        if parts & EXCLUDED_DIRS or path.suffix.lower() in EXCLUDED_EXTENSIONS:
+        if parts & EXCLUDED_DIRS or path.suffix.lower() in EXCLUDED_EXTENSIONS or path.name in LOCAL_ONLY_FILES:
             excluded.append(path)
             continue
         if path.stat().st_size > threshold:
@@ -117,7 +119,11 @@ def layout_warnings(root: Path) -> list[str]:
     warnings: list[str] = []
     files = [path for path in root.iterdir() if path.is_file()]
     dirs = [path for path in root.iterdir() if path.is_dir()]
-    unknown_files = [path.name for path in files if path.name not in ALLOWED_ROOT_FILES]
+    unknown_files = [
+        path.name
+        for path in files
+        if path.name not in ALLOWED_ROOT_FILES and path.name not in LOCAL_ONLY_FILES
+    ]
     unknown_dirs = [path.name for path in dirs if path.name not in ALLOWED_ROOT_DIRS]
     if unknown_files:
         warnings.append(f"root files not in the standard layout: {', '.join(sorted(unknown_files))}")

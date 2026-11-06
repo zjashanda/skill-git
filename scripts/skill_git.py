@@ -19,6 +19,7 @@ from urllib.parse import quote
 
 from skill_assets import (
     EXCLUDED_DIRS,
+    LOCAL_ONLY_FILES,
     build_archive,
     layout_warnings,
     scan_skill,
@@ -335,6 +336,7 @@ def build_skill_readme(meta: Dict[str, str], skill_path: Path, excluded: set[str
         for path in sorted(skill_path.rglob("*"))
         if path.is_file()
         and path.name != "README.md"
+        and path.name not in LOCAL_ONLY_FILES
         and str(path.relative_to(skill_path)).replace("\\", "/") not in excluded
         and "__pycache__" not in path.parts
         and not path.name.endswith(".pyc")
@@ -392,7 +394,12 @@ def copy_skill_to_repo_root(skill_path: Path, repo_dir: Path, excluded: set[str]
         target.mkdir(parents=True, exist_ok=True)
         for child in source.iterdir():
             relative = child.relative_to(skill_path).as_posix()
-            if should_skip(child.name) or child.name in EXCLUDED_DIRS or relative in excluded:
+            if (
+                should_skip(child.name)
+                or child.name in EXCLUDED_DIRS
+                or child.name in LOCAL_ONLY_FILES
+                or relative in excluded
+            ):
                 continue
             destination = target / child.name
             if child.is_dir():
