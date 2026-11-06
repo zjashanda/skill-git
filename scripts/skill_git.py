@@ -19,8 +19,8 @@ from urllib.parse import quote
 
 from skill_assets import (
     EXCLUDED_DIRS,
-    LOCAL_ONLY_FILES,
     build_archive,
+    is_local_only,
     layout_warnings,
     scan_skill,
     upload_archive,
@@ -154,20 +154,25 @@ def collect_asset_files(skill_path: Path, requested: list[str], include_large: b
         if not path.exists():
             raise FileNotFoundError(path)
         if path.is_file():
-            paths.add(path)
+            if not is_local_only(path.name):
+                paths.add(path)
         else:
             paths.update(
                 child
                 for child in path.rglob("*")
-                if child.is_file() and ".git" not in child.parts and "__pycache__" not in child.parts
+                if child.is_file()
+                and not is_local_only(child.name)
+                and ".git" not in child.parts
+                and "__pycache__" not in child.parts
             )
 
     if include_large:
-        excluded = {".git", ".opencode", "result", "multi_logs", "logs", "__pycache__"}
+        excluded = {".git", ".omo", ".opencode", "result", "multi_logs", "logs", "__pycache__"}
         paths.update(
             child
             for child in skill_path.rglob("*")
             if child.is_file()
+            and not is_local_only(child.name)
             and child.stat().st_size > max_bytes
             and not any(part in excluded for part in child.parts)
         )
@@ -336,7 +341,7 @@ def build_skill_readme(meta: Dict[str, str], skill_path: Path, excluded: set[str
         for path in sorted(skill_path.rglob("*"))
         if path.is_file()
         and path.name != "README.md"
-        and path.name not in LOCAL_ONLY_FILES
+        and not is_local_only(path.name)
         and str(path.relative_to(skill_path)).replace("\\", "/") not in excluded
         and "__pycache__" not in path.parts
         and not path.name.endswith(".pyc")
@@ -397,7 +402,7 @@ def copy_skill_to_repo_root(skill_path: Path, repo_dir: Path, excluded: set[str]
             if (
                 should_skip(child.name)
                 or child.name in EXCLUDED_DIRS
-                or child.name in LOCAL_ONLY_FILES
+                or is_local_only(child.name)
                 or relative in excluded
             ):
                 continue
