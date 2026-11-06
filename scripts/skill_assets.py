@@ -16,27 +16,42 @@ EXCLUDED_DIRS = {
     ".omo",
     ".opencode",
     ".pytest_cache",
+    ".venv",
     "__pycache__",
-    "node_modules",
-    "result",
-    "multi_logs",
+    "build",
+    "dist",
     "logs",
+    "multi_logs",
+    "node_modules",
+    "output",
+    "result",
+    "runtime",
+    "secrets",
+    "venv",
 }
-EXCLUDED_EXTENSIONS = {".log", ".pyc", ".pyo", ".tmp"}
-LOCAL_ONLY_FILES = {"plan.md"}
+EXCLUDED_EXTENSIONS = {".log", ".pyc", ".pyo", ".tmp", ".key", ".pem"}
+LOCAL_ONLY_FILES = {"plan.md", ".env", ".env.development", ".env.local", ".env.production"}
 
 
 def is_local_only(filename: str) -> bool:
-    return filename.casefold() in LOCAL_ONLY_FILES
+    value = filename.casefold()
+    return value in LOCAL_ONLY_FILES or value.endswith(".local.json") or value.endswith(".secret.json")
 GIT_WARN_BYTES = 1024 * 1024
 GIT_RECOMMENDED_MAX = 5 * 1024 * 1024
 GITHUB_HARD_BYTES = 100 * 1024 * 1024
+TEXT_EXTENSIONS = {
+    ".py", ".ps1", ".bat", ".cmd", ".sh", ".js", ".ts", ".json", ".jsonc",
+    ".yaml", ".yml", ".toml", ".ini", ".cfg", ".conf", ".env", ".md", ".txt",
+    ".xml", ".csv", ".sql", ".html",
+}
 SECRET_PATTERNS = (
     re.compile(r"LTAI[0-9A-Za-z]{12,}"),
     re.compile(r"gh[pousr]_[0-9A-Za-z]{20,}"),
     re.compile(r"github_pat_[0-9A-Za-z_]{20,}"),
     re.compile(r"AKIA[0-9A-Z]{16}"),
     re.compile(r"-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----"),
+    re.compile(r"sk-[A-Za-z0-9]{20,}"),
+    re.compile(r"xox[baprs]-[A-Za-z0-9-]{10,}"),
 )
 FOREGROUND_PATTERNS = (
     re.compile(r"Start-Process(?![^\r\n]*-WindowStyle\s+Hidden)", re.I),
@@ -71,11 +86,19 @@ def scan_skill(root: Path, threshold: int = GIT_WARN_BYTES) -> SkillScan:
         if parts & EXCLUDED_DIRS or path.suffix.lower() in EXCLUDED_EXTENSIONS or is_local_only(path.name):
             excluded.append(path)
             continue
-        if path.stat().st_size > threshold:
+        size = path.stat().st_size
+        if size > threshold:
             assets.append(path)
-        if path.name == "skill_assets.py":
+        if size > 2 * 1024 * 1024 or path.suffix.lower() not in TEXT_EXTENSIONS:
             continue
-        if path.suffix.lower() in {".py", ".ps1", ".bat", ".cmd", ".sh", ".js", ".ts"}:
+        try:
+            with path.open("rb") as binary:
+                sample = binary.read(2 * 1024 * 1024 + 1)
+            if b"\x00" in sample:
+                continue
+        except OSError:
+            continue
+        if path.suffix.lower() in TEXT_EXTENSIONS:
             try:
                 text = path.read_text(encoding="utf-8", errors="replace")
             except OSError:
@@ -84,7 +107,7 @@ def scan_skill(root: Path, threshold: int = GIT_WARN_BYTES) -> SkillScan:
                 if pattern.search(text):
                     secrets.append(str(relative))
                     break
-            if any(pattern.search(text) for pattern in FOREGROUND_PATTERNS):
+            if path.name not in {"skill_assets.py", "skill_git.py"} and any(pattern.search(text) for pattern in FOREGROUND_PATTERNS):
                 foreground.append(str(relative))
     return SkillScan(tuple(assets), tuple(excluded), tuple(sorted(set(secrets))), tuple(sorted(set(foreground))))
 

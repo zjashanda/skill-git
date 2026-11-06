@@ -1,1 +1,2 @@
 alibabacloud-oss-v2==1.4.1
+PyYAML>=6.0
