@@ -7,6 +7,7 @@ from typing import Any, Iterator, Optional
 from urllib.parse import quote
 
 from skill_assets import EXCLUDED_DIRS, EXCLUDED_EXTENSIONS, build_archive, is_local_only, layout_warnings, scan_skill, upload_archive, write_bootstrap
+from skill_lint import DEFAULT_MAX_BYTES, cache_root, lint_skill, write_audit
 
 DEFAULT_OWNER=os.environ.get("SKILL_GIT_OWNER","zjashanda"); DEFAULT_BRANCH=os.environ.get("SKILL_GIT_BRANCH","main")
 DEFAULT_SSH_HOST=os.environ.get("SKILL_GIT_SSH_HOST","github-zjashanda"); DEFAULT_VISIBILITY=os.environ.get("SKILL_GIT_VISIBILITY","public")
@@ -174,7 +175,7 @@ def git_auth_env(transport,token):
         ask=Path(d)/"askpass.cmd"
         ask.write_text('@echo off\r\n"%SKILL_GIT_PYTHON%" -c "import os,sys; prompt=sys.argv[1] if len(sys.argv)>1 else \'\'; print(\'x-access-token\' if \'Username\' in prompt else os.environ[\'SKILL_GIT_ASKPASS_TOKEN\'])" "%~1"\r\n',encoding="ascii")
         yield {"GIT_ASKPASS":str(ask),"GIT_TERMINAL_PROMPT":"0","SKILL_GIT_ASKPASS_TOKEN":token,"SKILL_GIT_PYTHON":sys.executable}
-def default_repo_dir(repo):return Path.home()/".codex"/"skill-git-repos"/repo
+def default_repo_dir(repo):return cache_root()/repo
 def ensure_git_identity(repo_dir,owner):
     name=run_command(["git","config","--get","user.name"],cwd=repo_dir,check=False).stdout.strip()
     email=run_command(["git","config","--get","user.email"],cwd=repo_dir,check=False).stdout.strip()
@@ -210,7 +211,7 @@ def commit_and_push(repo_dir,branch,message,push,transport,token):
         with git_auth_env(transport,token) as auth:run_command(["git","push","-u","origin",branch],cwd=repo_dir,env=auth)
     return True
 
-def lock_dir():return Path(os.environ.get("SKILL_GIT_LOCK_DIR",str(Path.home()/".codex"/"skill-git-repos"/".locks")))
+def lock_dir():return Path(os.environ.get("SKILL_GIT_LOCK_DIR",str(cache_root()/".locks")))
 @contextmanager
 def repo_lock(repo):
     directory=lock_dir();directory.mkdir(parents=True,exist_ok=True);path=directory/f"{repo}.lock"; timeout=float(os.environ.get("SKILL_GIT_LOCK_TIMEOUT","1800"))
@@ -292,14 +293,35 @@ def run_upload_assets(args):
     with tempfile.TemporaryDirectory() as d:
         archive=Path(d)/name;manifest=build_archive(root,assets,archive);result=upload_archive(archive,name,args.oss_prefix,args.oss_bucket,args.oss_endpoint,args.oss_region,args.oss_acl,manifest,args.oss_access_key_env,args.oss_secret_key_env);result["skill"]=repo
     print(json.dumps(result,ensure_ascii=False) if args.json else f"OSS archive: {result['archive_url']}\nOSS manifest: {result['manifest_url']}");return 0
+def lint_kwargs(args,readme_level="error"):
+    return {"max_bytes":args.max_size,"allow_large":args.allow_large,"registry_path":Path(args.registry).expanduser() if args.registry else None,"known_skills":args.known_skill,"readme_level":readme_level,"asset_threshold":getattr(args,"asset_threshold",None) or 1024*1024}
+def run_lint(args):
+    root=resolve_skill_path(args.skill_name,args.skill_path);report=lint_skill(root,**lint_kwargs(args))
+    if args.audit and not args.dry_run:
+        try:write_audit(report,args.audit_dir,command="lint-skill",fail_on_error=True);report.stats["audit"]="written"
+        except OSError as exc:report.add("audit","warning",f"audit record was not written: {exc}");report.stats["audit"]="failed"
+    else:report.stats["audit"]="skipped (--dry-run)" if args.dry_run else "not requested"
+    if args.json:print(json.dumps(report.to_dict(args.fail_on_error),ensure_ascii=False))
+    else:[print(line) for line in report.lines()]
+    return report.exit_code(args.fail_on_error)
+def enforce_lint(args,root,name):
+    report=lint_skill(root,**lint_kwargs(args,readme_level="warning"))
+    try:write_audit(report,args.audit_dir,command="publish-skill",fail_on_error=True,extra={"dry_run":bool(args.dry_run)})
+    except OSError as exc:print(f"WARNING: audit record was not written: {exc}",file=sys.stderr)
+    if report.errors:
+        detail="; ".join(f"[{v.rule}] {v.message}" for v in report.errors[:6])
+        raise ValidationError(f"lint-skill rejected {name}: {detail}")
+    for item in report.warnings:print(f"WARNING: [{item.rule}] {item.message}",file=sys.stderr if args.json else sys.stdout)
+    return report
 def run_publish_skill(args):
-    root=resolve_skill_path(args.skill_name,args.skill_path);meta=parse_skill(root);scan=scan_skill(root,args.asset_threshold)
+    root=resolve_skill_path(args.skill_name,args.skill_path);meta=parse_skill(root);report=enforce_lint(args,root,meta["name"]);scan=scan_skill(root,args.asset_threshold)
+    lint_summary={"verdict":report.verdict,"errors":len(report.errors),"warnings":len(report.warnings),"audit_path":report.audit_path}
     if scan.secrets:raise ValidationError(f"refusing to publish secrets in: {', '.join(scan.secrets)}")
     if scan.foreground_commands:raise ValidationError(f"foreground terminal command patterns found in: {', '.join(scan.foreground_commands)}")
     warnings=layout_warnings(root);[print(f"WARNING: {w}",file=sys.stderr if args.json else sys.stdout) for w in warnings];excluded={p.relative_to(root).as_posix() for p in scan.assets};manifest=None
     if scan.assets and args.asset_mode=="off":raise ValidationError(f"{len(scan.assets)} file(s) exceed {args.asset_threshold} bytes; use --asset-mode auto or move them to OSS first")
     if args.dry_run:
-        repo=resolve_repo_dir(meta["name"],args.repo_dir);diff=calculate_diff(root,repo) if repo.exists() else {"added":sorted(publishable_files(root)),"modified":[],"deleted":[],"unchanged":0};data={"diff":diff,"asset_count":len(scan.assets),"archive_name":f"{meta['name']}-assets.zip"};print(json.dumps(data) if args.json else f"Planned added: {len(diff['added'])}\nPlanned modified: {len(diff['modified'])}\nPlanned deleted: {len(diff['deleted'])}\nAsset count: {len(scan.assets)}\nArchive: {data['archive_name']}");return 0
+        repo=resolve_repo_dir(meta["name"],args.repo_dir);diff=calculate_diff(root,repo) if repo.exists() else {"added":sorted(publishable_files(root)),"modified":[],"deleted":[],"unchanged":0};data={"diff":diff,"asset_count":len(scan.assets),"archive_name":f"{meta['name']}-assets.zip","lint":lint_summary};print(json.dumps(data) if args.json else f"Lint: {lint_summary['verdict']} ({lint_summary['warnings']} warnings, audit {lint_summary['audit_path'] or 'none'})\nPlanned added: {len(diff['added'])}\nPlanned modified: {len(diff['modified'])}\nPlanned deleted: {len(diff['deleted'])}\nAsset count: {len(scan.assets)}\nArchive: {data['archive_name']}");return 0
     token,source=resolve_token(args.token_env)
     with repo_lock(meta["name"]):
         if scan.assets:
@@ -309,15 +331,19 @@ def run_publish_skill(args):
         created=ensure_remote_repo(args.owner,meta["name"],args.visibility,token);transport=select_transport(args.owner,meta["name"],args.ssh_host,args.transport);repo=resolve_repo_dir(meta["name"],args.repo_dir);ensure_local_repo(repo,args.owner,meta["name"],args.branch,args.ssh_host,transport,token);remove_worktree_contents(repo);copy_skill_to_repo_root(root,repo,excluded)
         if manifest:write_bootstrap(repo,manifest)
         (repo/"README.md").write_text(Path(args.readme_file).read_text(encoding="utf-8") if args.readme_file else build_skill_readme(meta,root,excluded),encoding="utf-8");changed=commit_and_push(repo,args.branch,args.commit_message or f"Publish {meta['name']}",not args.no_push,transport,token)
-    data={"skill":meta["name"],"created":created,"changed":changed,"pushed":not args.no_push and changed,"token_source":source};print(json.dumps(data) if args.json else f"Skill: {data['skill']}\nChanged: {'yes' if changed else 'no'}\nPushed: {'yes' if data['pushed'] else 'no'}");return 0
+    data={"skill":meta["name"],"created":created,"changed":changed,"pushed":not args.no_push and changed,"token_source":source,"lint":lint_summary};print(json.dumps(data) if args.json else f"Skill: {data['skill']}\nChanged: {'yes' if changed else 'no'}\nPushed: {'yes' if data['pushed'] else 'no'}");return 0
 
 def common(parser):
     parser.add_argument("--owner",default=DEFAULT_OWNER);parser.add_argument("--branch",default=DEFAULT_BRANCH);parser.add_argument("--ssh-host",default=DEFAULT_SSH_HOST);parser.add_argument("--transport",choices=("auto","ssh","https"),default=DEFAULT_TRANSPORT);parser.add_argument("--visibility",choices=("public","private"),default=DEFAULT_VISIBILITY);parser.add_argument("--token-env",default=DEFAULT_TOKEN_ENV);parser.add_argument("--repo-dir");parser.add_argument("--json",action="store_true")
+def lint_options(parser,gate=False):
+    parser.add_argument("--max-size",type=int,default=DEFAULT_MAX_BYTES);parser.add_argument("--allow-large",action="store_true");parser.add_argument("--registry");parser.add_argument("--known-skill",action="append",default=[]);parser.add_argument("--audit-dir")
+    if gate:parser.add_argument("--audit",action="store_true");parser.add_argument("--dry-run",action="store_true");parser.add_argument("--fail-on-error",action="store_true")
 def build_parser():
     p=argparse.ArgumentParser(description="Publish Codex skills to same-name GitHub repositories.");s=p.add_subparsers(dest="command",required=True)
     q=s.add_parser("show-config");common(q);q.set_defaults(func=run_show_config)
     q=s.add_parser("ensure-repo");common(q);q.add_argument("--repo-name",required=True);q.set_defaults(func=run_ensure_repo)
-    q=s.add_parser("publish-skill");common(q);q.add_argument("--skill-name");q.add_argument("--skill-path");q.add_argument("--readme-file");q.add_argument("--commit-message");q.add_argument("--no-push",action="store_true");q.add_argument("--dry-run",action="store_true");q.add_argument("--asset-mode",choices=("auto","off"),default=DEFAULT_ASSET_MODE);q.add_argument("--asset-threshold",type=int,default=DEFAULT_ASSET_THRESHOLD);q.add_argument("--oss-access-key-env",default=DEFAULT_OSS_ACCESS_KEY_ENV);q.add_argument("--oss-secret-key-env",default=DEFAULT_OSS_SECRET_ENV);q.add_argument("--oss-endpoint",default=DEFAULT_OSS_ENDPOINT);q.add_argument("--oss-region",default=DEFAULT_OSS_REGION);q.add_argument("--oss-bucket",default=DEFAULT_OSS_BUCKET);q.add_argument("--oss-prefix",default=DEFAULT_OSS_PREFIX);q.add_argument("--oss-acl",choices=("private","public-read","public-read-write"),default=DEFAULT_OSS_ACL);q.set_defaults(func=run_publish_skill)
+    q=s.add_parser("lint-skill");common(q);q.add_argument("--skill-name");q.add_argument("--skill-path");lint_options(q,gate=True);q.set_defaults(func=run_lint)
+    q=s.add_parser("publish-skill");common(q);q.add_argument("--skill-name");q.add_argument("--skill-path");q.add_argument("--readme-file");q.add_argument("--commit-message");q.add_argument("--no-push",action="store_true");q.add_argument("--dry-run",action="store_true");q.add_argument("--asset-mode",choices=("auto","off"),default=DEFAULT_ASSET_MODE);q.add_argument("--asset-threshold",type=int,default=DEFAULT_ASSET_THRESHOLD);lint_options(q);q.add_argument("--oss-access-key-env",default=DEFAULT_OSS_ACCESS_KEY_ENV);q.add_argument("--oss-secret-key-env",default=DEFAULT_OSS_SECRET_ENV);q.add_argument("--oss-endpoint",default=DEFAULT_OSS_ENDPOINT);q.add_argument("--oss-region",default=DEFAULT_OSS_REGION);q.add_argument("--oss-bucket",default=DEFAULT_OSS_BUCKET);q.add_argument("--oss-prefix",default=DEFAULT_OSS_PREFIX);q.add_argument("--oss-acl",choices=("private","public-read","public-read-write"),default=DEFAULT_OSS_ACL);q.set_defaults(func=run_publish_skill)
     q=s.add_parser("upload-assets");common(q);q.add_argument("--skill-name");q.add_argument("--skill-path");q.add_argument("--asset",action="append",default=[]);q.add_argument("--include-large",action="store_true");q.add_argument("--max-bytes",type=int,default=DEFAULT_ASSET_MAX_BYTES);q.add_argument("--archive-name",default="");q.add_argument("--dry-run",action="store_true");q.add_argument("--allow-public-write",action="store_true");q.add_argument("--oss-access-key-env",default=DEFAULT_OSS_ACCESS_KEY_ENV);q.add_argument("--oss-secret-key-env",default=DEFAULT_OSS_SECRET_ENV);q.add_argument("--oss-endpoint",default=DEFAULT_OSS_ENDPOINT);q.add_argument("--oss-region",default=DEFAULT_OSS_REGION);q.add_argument("--oss-bucket",default=DEFAULT_OSS_BUCKET);q.add_argument("--oss-prefix",default=DEFAULT_OSS_PREFIX);q.add_argument("--oss-acl",choices=("private","public-read","public-read-write"),default=DEFAULT_OSS_ACL);q.set_defaults(func=run_upload_assets)
     for name,func in (("diff-skill",run_diff),("pull-skill",run_pull)):
         q=s.add_parser(name);common(q);q.add_argument("--skill-name");q.add_argument("--skill-path");
