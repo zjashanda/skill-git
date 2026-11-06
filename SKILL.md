@@ -1,6 +1,6 @@
 ---
 name: skill-git
-description: Publish local Codex skills to GitHub with one token and one SSH transport, using the skill name as the repository name. Use when Codex needs to create or verify a GitHub repo for a skill, export a local skill into a same-name repository, generate a GitHub README from SKILL.md, commit and push updates, or explain the standard skill publishing workflow.
+description: Publish local Codex skills to GitHub with token/SSH transport and optional OSS assets, using the skill name as the repository name. Use when Codex needs to create or verify a GitHub repo for a skill, export a local skill into a same-name repository, generate a GitHub README from SKILL.md, package large assets to OSS, commit and push updates, or explain the standard skill publishing workflow.
 ---
 
 # Skill Git
@@ -16,7 +16,7 @@ Use `scripts/skill_git.py` whenever a local skill needs to be published to GitHu
 - repo layout rule: repo root directly contains `SKILL.md`, `README.md`, `agents/`, `scripts/`, and other skill files
 - local repo cache: `~/.codex/skill-git-repos/<repo-name>`
 
-## Node Environment
+## Runtime Environment
 
 Required runtime:
 
@@ -128,7 +128,7 @@ large files to GitHub.
 
 - Publish each skill into its own same-name repository. Do not add an extra skill root directory inside the repository.
 - Use the GitHub token only for GitHub API calls such as checking or creating repositories.
-- Use SSH for clone, fetch, pull, and push so the token is not embedded in git remotes.
+- Prefer SSH when available; when using HTTPS, pass the token through the temporary askpass helper and never embed it in a Git remote.
 - Generate a root `README.md` for GitHub by default so the repository is readable outside Codex.
 - Exclude `.git`, `__pycache__`, `.pyc`, and similar cache artifacts from published repositories.
 - Do not print or persist the token value.
@@ -136,3 +136,6 @@ large files to GitHub.
 ## Resource
 
 - `scripts/skill_git.py`: Create or verify a same-name GitHub repo for a skill, sync the skill contents to the repo root, generate `README.md`, commit, and push.
+- `scripts/skill_assets.py`: Scan large assets, create OSS archives/manifests, and generate the restore script.
+- `references/asset-policy.md`: Git/OSS thresholds and exclusion policy.
+- `requirements.txt`: Python runtime dependencies, including the Alibaba Cloud OSS SDK.

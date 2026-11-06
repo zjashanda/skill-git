@@ -18,8 +18,9 @@
 
 ## 永远不进入 Git
 
+- `plan.md`（大小写不敏感、任意层级）和 `.omo/`，它们是本地计划文件
 - `result/`、`multi_logs/`、`logs/`、串口原始日志
-- `.opencode/`、`.git/`、`__pycache__/`、`.pyc`、临时文件
+- `.opencode/`、`.git/`、`__pycache__/`、`.pytest_cache/`、`node_modules/`、`.pyc`、临时文件
 - 运行生成的测试报告、截图、录音、录屏
 - 可重新生成的构建中间件：`.asm`、`.lst`、`.map`、`.elf` 等
 - 密钥、token、AccessKey、私钥、证书私钥

@@ -154,7 +154,8 @@ def collect_asset_files(skill_path: Path, requested: list[str], include_large: b
         if not path.exists():
             raise FileNotFoundError(path)
         if path.is_file():
-            if not is_local_only(path.name):
+            relative_parts = path.relative_to(skill_path).parts
+            if not is_local_only(path.name) and not (set(relative_parts) & EXCLUDED_DIRS):
                 paths.add(path)
         else:
             paths.update(
@@ -162,19 +163,17 @@ def collect_asset_files(skill_path: Path, requested: list[str], include_large: b
                 for child in path.rglob("*")
                 if child.is_file()
                 and not is_local_only(child.name)
-                and ".git" not in child.parts
-                and "__pycache__" not in child.parts
+                and not (set(child.relative_to(skill_path).parts) & EXCLUDED_DIRS)
             )
 
     if include_large:
-        excluded = {".git", ".omo", ".opencode", "result", "multi_logs", "logs", "__pycache__"}
         paths.update(
             child
             for child in skill_path.rglob("*")
             if child.is_file()
             and not is_local_only(child.name)
             and child.stat().st_size > max_bytes
-            and not any(part in excluded for part in child.parts)
+            and not (set(child.relative_to(skill_path).parts) & EXCLUDED_DIRS)
         )
 
     if not paths:
@@ -342,8 +341,8 @@ def build_skill_readme(meta: Dict[str, str], skill_path: Path, excluded: set[str
         if path.is_file()
         and path.name != "README.md"
         and not is_local_only(path.name)
+        and not (set(path.relative_to(skill_path).parts) & EXCLUDED_DIRS)
         and str(path.relative_to(skill_path)).replace("\\", "/") not in excluded
-        and "__pycache__" not in path.parts
         and not path.name.endswith(".pyc")
     ]
 
@@ -365,9 +364,10 @@ def build_skill_readme(meta: Dict[str, str], skill_path: Path, excluded: set[str
             "",
             "```text",
             f"~/.codex/skills/{meta['name']}",
+            f"~/.config/opencode/skills/{meta['name']}",
             "```",
             "",
-            "Then restart Codex.",
+            "Then restart Codex or OpenCode.",
             "",
             "## Usage and workflow",
             "",
