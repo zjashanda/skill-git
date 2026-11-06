@@ -20,4 +20,4 @@
 - [completed] Added SSH/HTTPS transport selection, token askpass support, secret scanning, foreground-terminal checks, and layout/environment warnings.
 - [completed] Added `requirements.txt`, `references/asset-policy.md`, and dual-client install copies under `.codex` and `.config/opencode`.
 - [completed] Verified Python compilation, publish help options, OSS module upload/public download/delete, transport probing, and asset bootstrap generation.
-- [pending] No live GitHub push was performed in this verification run; requires a working GitHub token/SSH session.
+- [completed] Live GitHub push completed on 2026-11-06; remote `zjashanda/skill-git` main was updated from local `skill-git` via SSH.
